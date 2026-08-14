@@ -191,6 +191,7 @@
   }
   .badge.a_iniciar{ background: var(--support); }
   .badge.em_producao{ background: var(--accent); }
+  .badge.aguardando_retirada{ background: var(--dark); }
   .badge.entregue{ background: var(--text); }
   .badge.atrasado{ background:#a33; }
 
@@ -277,13 +278,56 @@
   .color-card .info span{ font-size:.8rem; color: var(--dark); }
 
   /* ===== calendário ===== */
-  .agenda-group{ margin-bottom: 18px; }
-  .agenda-group h3{
-    font-size:1rem; margin:0 0 8px; padding-bottom:6px;
-    border-bottom:2px dashed var(--support);
-    display:flex; justify-content:space-between; align-items:center;
+  .cal-nav{
+    display:flex; align-items:center; justify-content:space-between;
+    gap:10px; margin-bottom:14px; flex-wrap:wrap;
   }
-  .agenda-group h3 .count{ font-family: var(--font-text); font-size:.8rem; background:var(--accent); color:#fff; padding:2px 10px; border-radius:999px;}
+  .cal-nav .cal-month-label{
+    font-family: var(--font-title); color: var(--title); font-size:1.3rem; font-weight:700;
+    text-transform:capitalize; min-width:180px; text-align:center;
+  }
+  .cal-nav-btns{ display:flex; gap:8px; align-items:center; }
+  .cal-grid{
+    display:grid; grid-template-columns: repeat(7, 1fr);
+    gap:4px; margin-bottom:18px;
+  }
+  .cal-weekday{
+    text-align:center; font-size:.72rem; font-weight:700; color: var(--dark);
+    text-transform:uppercase; letter-spacing:.4px; padding-bottom:4px;
+  }
+  .cal-day{
+    background:#fff8ec; border:2px solid var(--support); border-radius:10px;
+    min-height:64px; padding:5px 5px 6px; cursor:pointer;
+    display:flex; flex-direction:column; gap:3px;
+    transition: transform .1s ease, box-shadow .1s ease;
+  }
+  .cal-day:hover{ transform: translateY(-1px); box-shadow:0 2px 0 var(--support); }
+  .cal-day.empty{ background:transparent; border:none; cursor:default; box-shadow:none; }
+  .cal-day.today{ border-color: var(--title); border-width:3px; }
+  .cal-day.selected{ background: var(--title); }
+  .cal-day.selected .cal-day-num{ color:#fff8ec; }
+  .cal-day.has-late .cal-day-num{ color:#a33; }
+  .cal-day-num{ font-size:.8rem; font-weight:700; color: var(--dark); }
+  .cal-day-dots{ display:flex; flex-wrap:wrap; gap:3px; }
+  .cal-dot{ width:9px; height:9px; border-radius:50%; flex:none; }
+  .cal-day-more{ font-size:.62rem; color: var(--dark); font-weight:700; }
+  @media (max-width:600px){
+    .cal-day{ min-height:46px; padding:4px 3px; }
+    .cal-day-num{ font-size:.7rem; }
+    .cal-weekday{ font-size:.6rem; }
+  }
+
+  .cal-panel{ margin-bottom:16px; }
+  .cal-panel h3{
+    font-size:1rem; margin:0 0 10px; padding-bottom:6px;
+    border-bottom:2px dashed var(--support);
+  }
+  .cal-panel .countdown{
+    font-size:.72rem; font-weight:700; padding:2px 9px; border-radius:999px;
+    background: var(--accent); color:#fff; white-space:nowrap;
+  }
+  .cal-panel .countdown.late{ background:#a33; }
+  .cal-panel .countdown.today{ background: var(--title); }
   .agenda-item{
     display:flex; justify-content:space-between; align-items:center; gap:10px;
     background:#fff8ec; border:1px solid var(--support); border-radius:10px;
@@ -370,6 +414,7 @@
         <option value="">Todos os status</option>
         <option value="a_iniciar">A iniciar</option>
         <option value="em_producao">Em produção</option>
+        <option value="aguardando_retirada">Aguardando retirada</option>
         <option value="entregue">Entregue</option>
       </select>
       <select id="filterColor"><option value="">Todas as cores</option></select>
@@ -406,9 +451,27 @@
   <section id="tab-calendar" class="tab-panel">
     <div class="card" style="margin-bottom:16px;">
       <h3 style="margin:0 0 4px;">Agenda de produção</h3>
-      <p style="margin:0; font-size:.88rem; color: var(--dark);">Pedidos organizados pela data de entrega prevista.</p>
+      <p style="margin:0; font-size:.88rem; color: var(--dark);">Toque em um dia para ver os pedidos com entrega prevista naquela data.</p>
     </div>
-    <div id="agendaContainer"></div>
+
+    <div class="cal-nav">
+      <div class="cal-nav-btns">
+        <button class="btn small secondary" id="calPrevBtn">‹ Anterior</button>
+        <button class="btn small dark" id="calTodayBtn">Hoje</button>
+      </div>
+      <div class="cal-month-label" id="calMonthLabel"></div>
+      <div class="cal-nav-btns">
+        <button class="btn small secondary" id="calNextBtn">Próximo ›</button>
+      </div>
+    </div>
+
+    <div class="cal-grid" id="calWeekdays"></div>
+    <div class="cal-grid" id="calGrid"></div>
+
+    <div class="card cal-panel">
+      <h3 id="calPanelTitle">Pedidos do dia</h3>
+      <div id="calPanelContent"></div>
+    </div>
   </section>
 
 </main>
@@ -444,6 +507,7 @@
           <select id="f_status">
             <option value="a_iniciar">A iniciar</option>
             <option value="em_producao">Em produção</option>
+            <option value="aguardando_retirada">Aguardando retirada</option>
             <option value="entregue">Entregue</option>
           </select>
         </label>
@@ -472,70 +536,49 @@
 (function(){
   "use strict";
 
-  const STORAGE_KEY = "croche_pedidos_v1";
+  const STORAGE_KEY = "croche_pedidos_v3";
 
-  const STATUS_LABEL = { a_iniciar:"A iniciar", em_producao:"Em produção", entregue:"Entregue" };
-  const STATUS_COLOR = { a_iniciar:"#BA797D", em_producao:"#D39E02", entregue:"#A4A859" };
+  const STATUS_LABEL = { a_iniciar:"A iniciar", em_producao:"Em produção", aguardando_retirada:"Aguardando retirada", entregue:"Entregue" };
+  const STATUS_COLOR = { a_iniciar:"#BA797D", em_producao:"#D39E02", aguardando_retirada:"#63313C", entregue:"#A4A859" };
 
   function uid(){ return 'ord_' + Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
 
   function seedData(){
     return [
       {
-        id: uid(), product:"Bolsa de praia Concha", client:"Marina Silva",
-        contactType:"whatsapp", contactValue:"5511987654321",
-        adjustments:"Alça mais longa (60cm) e forro impermeável.",
-        color:"Areia", status:"entregue",
-        orderDate:"2026-06-10", expectedDate:"2026-06-24", deliveredDate:"2026-06-23"
+        id: "ord_mss4wzh5sokiy", product:"Bolsa espresso", client:"Luciana Unanxious",
+        contactType:"whatsapp", contactValue:"+5531999992405",
+        adjustments:"",
+        color:"Cacau", status:"em_producao",
+        orderDate:"2026-07-31", expectedDate:"2026-08-21", deliveredDate:null
       },
       {
-        id: uid(), product:"Amigurumi Coelho", client:"Beatriz Nogueira",
-        contactType:"instagram", contactValue:"@bia.nogueira",
-        adjustments:"Cor dos olhos: marrom. Tamanho pequeno (15cm).",
-        color:"Rosa Bebê", status:"entregue",
-        orderDate:"2026-07-01", expectedDate:"2026-07-10", deliveredDate:"2026-07-12"
+        id: "ord_mss4y48y8evv5", product:"Bolsa Champanhe", client:"Ana Flávia Unanxious",
+        contactType:"whatsapp", contactValue:"+5531992450020",
+        adjustments:"",
+        color:"Cacau", status:"a_iniciar",
+        orderDate:"2026-07-31", expectedDate:"2026-08-21", deliveredDate:null
       },
       {
-        id: uid(), product:"Blusa cropped Verão", client:"Camila Duarte",
-        contactType:"whatsapp", contactValue:"5521998877665",
-        adjustments:"Tamanho M, decote canoa, sem mangas.",
-        color:"Terracota", status:"em_producao",
-        orderDate:"2026-07-25", expectedDate:"2026-08-10", deliveredDate:null
+        id: "ord_mss51jqobbuv5", product:"Bolsa Champanhe", client:"Camila Monteiro Unanxious",
+        contactType:"whatsapp", contactValue:"+5533999306166",
+        adjustments:"Alça com duas bolas a menos e apoiador de ombro mais grosso",
+        color:"Cacau", status:"a_iniciar",
+        orderDate:"2026-08-07", expectedDate:"2026-08-30", deliveredDate:null
       },
       {
-        id: uid(), product:"Tapete redondo Ondas", client:"Débora Faria",
-        contactType:"whatsapp", contactValue:"5531991234567",
-        adjustments:"Diâmetro 90cm, tons terrosos misturados.",
-        color:"Multicolor Terra", status:"a_iniciar",
-        orderDate:"2026-08-05", expectedDate:"2026-08-30", deliveredDate:null
+        id: "ord_mss53tnaxiz1o", product:"Bolsa champanhe", client:"Gabriela Torres",
+        contactType:"instagram", contactValue:"@gabrielaptorres",
+        adjustments:"",
+        color:"Citrino", status:"em_producao",
+        orderDate:"2026-08-08", expectedDate:"2026-08-30", deliveredDate:null
       },
       {
-        id: uid(), product:"Cardigã Outono", client:"Elisa Prado",
-        contactType:"instagram", contactValue:"@elisa.prado",
-        adjustments:"Tamanho G, botões de madeira, gola alta.",
-        color:"Verde Musgo", status:"em_producao",
-        orderDate:"2026-07-15", expectedDate:"2026-08-05", deliveredDate:null
-      },
-      {
-        id: uid(), product:"Amigurumi Ursinho", client:"Fernanda Reis",
-        contactType:"whatsapp", contactValue:"5541999887766",
-        adjustments:"Com laço rosa no pescoço, 20cm de altura.",
-        color:"Bege", status:"a_iniciar",
-        orderDate:"2026-08-08", expectedDate:"2026-08-20", deliveredDate:null
-      },
-      {
-        id: uid(), product:"Xale Inverno", client:"Gabriela Torres",
-        contactType:"instagram", contactValue:"@gabi.torres",
-        adjustments:"Franjas longas, tom mais escuro possível.",
-        color:"Vinho", status:"em_producao",
-        orderDate:"2026-07-05", expectedDate:"2026-07-28", deliveredDate:null
-      },
-      {
-        id: uid(), product:"Body de bebê Nuvem", client:"Helena Martins",
-        contactType:"whatsapp", contactValue:"5551991122334",
-        adjustments:"Tamanho RN, botões de pressão, sem estampa.",
-        color:"Branco Cru", status:"entregue",
-        orderDate:"2026-06-20", expectedDate:"2026-07-01", deliveredDate:"2026-07-05"
+        id: uid(), product:"Bolsa espresso", client:"Carol Esposa Vinicius",
+        contactType:"whatsapp", contactValue:"+5531997782066",
+        adjustments:"Bolsa espresso tamanho menor",
+        color:"7673 Poli Círculo", status:"a_iniciar",
+        orderDate:"2026-08-03", expectedDate:"2026-09-04", deliveredDate:null
       }
     ];
   }
@@ -568,7 +611,7 @@
   }
 
   function isLate(order){
-    return order.status !== "entregue" && order.expectedDate < todayStr;
+    return (order.status === "a_iniciar" || order.status === "em_producao") && order.expectedDate < todayStr;
   }
 
   function slaOf(order){
@@ -623,6 +666,7 @@
     const entregues = orders.filter(o=>o.status==="entregue").length;
     const producao = orders.filter(o=>o.status==="em_producao").length;
     const aIniciar = orders.filter(o=>o.status==="a_iniciar").length;
+    const aguardandoRetirada = orders.filter(o=>o.status==="aguardando_retirada").length;
     const atrasados = orders.filter(isLate).length;
     const slaList = orders.filter(o=>o.status==="entregue" && o.deliveredDate).map(slaOf);
     const slaMedio = slaList.length ? (slaList.reduce((a,b)=>a+b,0)/slaList.length).toFixed(1) : "—";
@@ -651,16 +695,17 @@
       Atualmente <strong>${producao}</strong> peça(s) em produção e <strong>${aIniciar}</strong> aguardando início.
     `;
 
-    drawChart(aIniciar, producao, entregues);
+    drawChart(aIniciar, producao, aguardandoRetirada, entregues);
   }
 
-  function drawChart(aIniciar, producao, entregues){
+  function drawChart(aIniciar, producao, aguardandoRetirada, entregues){
     const canvas = document.getElementById("statusChart");
     const ctx = canvas.getContext("2d");
     ctx.clearRect(0,0,canvas.width, canvas.height);
     const data = [
       {label:"A iniciar", value:aIniciar, color: STATUS_COLOR.a_iniciar},
       {label:"Em produção", value:producao, color: STATUS_COLOR.em_producao},
+      {label:"Aguardando retirada", value:aguardandoRetirada, color: STATUS_COLOR.aguardando_retirada},
       {label:"Entregue", value:entregues, color: STATUS_COLOR.entregue},
     ];
     const total = data.reduce((a,b)=>a+b.value,0);
@@ -802,7 +847,7 @@
   const colorMap = {
     "areia":"#D8C6A0","terracota":"#C1622C","rosa bebê":"#F4C2C2","rosa bebe":"#F4C2C2",
     "verde musgo":"#6B7A3A","bege":"#E4D2B0","vinho":"#5C1A2B","branco cru":"#F5F0E6",
-    "multicolor terra":"#B08050"
+    "multicolor terra":"#B08050","cacau":"#4A2C1D","citrino":"#E9C46A"
   };
   function colorToHex(name){
     const key = (name||"").toLowerCase().trim();
@@ -993,41 +1038,118 @@
   }
 
   /* ---------------- CALENDÁRIO ---------------- */
+  const WEEKDAY_NAMES = ["Dom","Seg","Ter","Qua","Qui","Sex","Sáb"];
+  const MONTH_NAMES = ["janeiro","fevereiro","março","abril","maio","junho","julho","agosto","setembro","outubro","novembro","dezembro"];
+
+  const todayParts = todayStr.split("-").map(Number);
+  let calViewYear = todayParts[0];
+  let calViewMonth = todayParts[1] - 1; // 0-indexed
+  let calSelectedDate = todayStr;
+
+  function pad2(n){ return n<10 ? "0"+n : ""+n; }
+  function dateKey(y,m,d){ return `${y}-${pad2(m+1)}-${pad2(d)}`; }
+
+  function ordersByExpectedDate(){
+    const map = {};
+    orders.forEach(o=>{
+      if(o.status === "entregue" || !o.expectedDate) return;
+      if(!map[o.expectedDate]) map[o.expectedDate] = [];
+      map[o.expectedDate].push(o);
+    });
+    return map;
+  }
+
   function renderCalendar(){
-    const container = document.getElementById("agendaContainer");
-    const active = orders.filter(o=>o.status !== "entregue");
-    if(active.length === 0){
-      container.innerHTML = `<div class="empty-msg">Nenhum pedido pendente de entrega. 🎉</div>`;
+    // cabeçalho dos dias da semana (renderiza uma vez, é sempre igual)
+    const weekdaysEl = document.getElementById("calWeekdays");
+    weekdaysEl.innerHTML = WEEKDAY_NAMES.map(d=>`<div class="cal-weekday">${d}</div>`).join("");
+
+    document.getElementById("calMonthLabel").textContent = `${MONTH_NAMES[calViewMonth]} de ${calViewYear}`;
+
+    const byDate = ordersByExpectedDate();
+    const firstDay = new Date(calViewYear, calViewMonth, 1);
+    const startWeekday = firstDay.getDay();
+    const daysInMonth = new Date(calViewYear, calViewMonth+1, 0).getDate();
+
+    let cells = [];
+    for(let i=0;i<startWeekday;i++) cells.push(null);
+    for(let d=1; d<=daysInMonth; d++) cells.push(d);
+    while(cells.length % 7 !== 0) cells.push(null);
+
+    const gridEl = document.getElementById("calGrid");
+    gridEl.innerHTML = cells.map(d=>{
+      if(d === null) return `<div class="cal-day empty"></div>`;
+      const key = dateKey(calViewYear, calViewMonth, d);
+      const dayOrders = byDate[key] || [];
+      const hasLate = dayOrders.some(o=>key < todayStr && (o.status==="a_iniciar"||o.status==="em_producao"));
+      const classes = ["cal-day"];
+      if(key === todayStr) classes.push("today");
+      if(key === calSelectedDate) classes.push("selected");
+      if(hasLate) classes.push("has-late");
+      const dots = dayOrders.slice(0,4).map(o=>`<span class="cal-dot" style="background:${STATUS_COLOR[o.status]||'#999'}"></span>`).join("");
+      const more = dayOrders.length > 4 ? `<span class="cal-day-more">+${dayOrders.length-4}</span>` : "";
+      return `
+        <div class="${classes.join(' ')}" data-date="${key}" onclick="selectCalDate('${key}')">
+          <span class="cal-day-num">${d}</span>
+          <div class="cal-day-dots">${dots}${more}</div>
+        </div>`;
+    }).join("");
+
+    renderCalPanel();
+  }
+
+  function renderCalPanel(){
+    const byDate = ordersByExpectedDate();
+    const items = byDate[calSelectedDate] || [];
+    const title = document.getElementById("calPanelTitle");
+    const content = document.getElementById("calPanelContent");
+
+    const diasRestantes = daysBetween(todayStr, calSelectedDate);
+    let quando = "";
+    if(diasRestantes === 0) quando = "hoje";
+    else if(diasRestantes > 0) quando = `em ${diasRestantes} dia${diasRestantes>1?'s':''}`;
+    else quando = `há ${Math.abs(diasRestantes)} dia${Math.abs(diasRestantes)>1?'s':''} (atrasado)`;
+
+    title.textContent = `📅 ${fmtDate(calSelectedDate)} — ${quando}`;
+
+    if(items.length === 0){
+      content.innerHTML = `<div class="empty-msg">Nenhuma entrega prevista para este dia.</div>`;
       return;
     }
-    const groups = {};
-    active.forEach(o=>{
-      const key = o.expectedDate;
-      if(!groups[key]) groups[key] = [];
-      groups[key].push(o);
-    });
-    const dates = Object.keys(groups).sort();
-    container.innerHTML = dates.map(date=>{
-      const items = groups[date];
-      const late = date < todayStr;
+    content.innerHTML = items.map(o=>{
+      const late = calSelectedDate < todayStr && (o.status==="a_iniciar"||o.status==="em_producao");
       return `
-      <div class="agenda-group">
-        <h3>
-          <span>${late ? "⏰ " : "📅 "}${fmtDate(date)} ${late ? "— ATRASADO" : ""}</span>
-          <span class="count">${items.length} pedido${items.length>1?'s':''}</span>
-        </h3>
-        ${items.map(o=>`
-          <div class="agenda-item">
-            <div class="left">
-              <span class="color-dot" style="background:${colorToHex(o.color)}"></span>
-              <strong>${escapeHtml(o.product)}</strong> — ${escapeHtml(o.client)}
-            </div>
-            <span class="badge ${o.status}">${STATUS_LABEL[o.status]}</span>
-          </div>
-        `).join("")}
+      <div class="agenda-item">
+        <div class="left">
+          <span class="color-dot" style="background:${colorToHex(o.color)}"></span>
+          <strong>${escapeHtml(o.product)}</strong> — ${escapeHtml(o.client)}
+        </div>
+        <span class="badge ${o.status}">${STATUS_LABEL[o.status]}</span>
       </div>`;
     }).join("");
   }
+
+  window.selectCalDate = function(key){
+    calSelectedDate = key;
+    renderCalendar();
+  };
+
+  document.getElementById("calPrevBtn").addEventListener("click", ()=>{
+    calViewMonth--;
+    if(calViewMonth < 0){ calViewMonth = 11; calViewYear--; }
+    renderCalendar();
+  });
+  document.getElementById("calNextBtn").addEventListener("click", ()=>{
+    calViewMonth++;
+    if(calViewMonth > 11){ calViewMonth = 0; calViewYear++; }
+    renderCalendar();
+  });
+  document.getElementById("calTodayBtn").addEventListener("click", ()=>{
+    calViewYear = todayParts[0];
+    calViewMonth = todayParts[1] - 1;
+    calSelectedDate = todayStr;
+    renderCalendar();
+  });
 
   /* ---------------- INIT ---------------- */
   function renderAll(){
@@ -1042,3 +1164,5 @@
 </script>
 </body>
 </html>
+
+
